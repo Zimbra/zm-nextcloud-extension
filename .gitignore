@@ -1,0 +1,10 @@
+build
+lib
+lib-oauth
+sardine.jar
+.idea
+*.iml
+openjdk*
+java*
+META-INF
+out/

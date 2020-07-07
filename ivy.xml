@@ -1,0 +1,54 @@
+<ivy-module version="2.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xsi:noNamespaceSchemaLocation="http://ant.apache.org/ivy/schemas/ivy.xsd">
+    <info organisation="zimbra" module="zm-nextcloud-extension" status="integration" />
+    <dependencies>
+      <!-- Servlet Requirements -->
+      <dependency org="javax.servlet" name="javax.servlet-api" rev="3.1.0" />
+      <dependency org="javax.ws.rs" name="javax.ws.rs-api" rev="2.0.1" />
+      <!-- JWT Requirements -->
+      <dependency org="com.auth0" name="java-jwt" rev="3.2.0" />
+      <!-- Common Requirements -->
+      <dependency org="commons-collections" name="commons-collections" rev="3.2.2" />
+      <dependency org="commons-io" name="commons-io" rev="1.4" />
+      <dependency org="commons-codec" name="commons-codec" rev="1.7" />
+      <dependency org="commons-lang" name="commons-lang" rev="2.6" />
+      <dependency org="org.apache.httpcomponents" name="httpclient" rev="${httpclient.version}" />
+      <dependency org="org.apache.httpcomponents" name="httpcore" rev="${httpclient.httpcore.version}" />
+      
+      <!-- Required by Sardine -->
+      <dependency org="commons-logging" name="commons-logging" rev="1.2" />
+      <dependency org="org.slf4j" name="slf4j-api" rev="1.6.4" />
+      <dependency org="org.slf4j" name="slf4j-log4j12" rev="1.6.4" />
+      <dependency org="org.apache.ant" name="ant" rev="1.8.2" />      
+      
+      <!-- Local Requirements -->
+      <dependency org="zimbra" name="zm-common" rev="latest.integration" />
+      <dependency org="zimbra" name="zm-client" rev="latest.integration" />
+      <dependency org="zimbra" name="zm-soap" rev="latest.integration" />
+      <dependency org="zimbra" name="zm-store" rev="latest.integration" />
+      <dependency org="zimbra" name="zm-oauth-social-common" rev="latest.integration"/>
+      <!-- Transitive Requirements -->
+      <dependency org="com.fasterxml.jackson.core" name="jackson-core" rev="2.9.2"/>
+      <dependency org="com.fasterxml.jackson.core" name="jackson-annotations" rev="2.9.2"/>
+      <dependency org="com.fasterxml.jackson.core" name="jackson-databind" rev="2.9.2"/>
+      <!-- Test Requirements -->
+      <dependency org="junit" name="junit" rev="4.8.2" />
+      <dependency org="org.powermock" name="powermock-core" rev="1.6.5" />
+      <dependency org="org.powermock" name="powermock-api-support" rev="1.6.5" />
+      <dependency org="org.powermock" name="powermock-reflect" rev="1.6.5" />
+      <dependency org="org.powermock" name="powermock-api-easymock" rev="1.6.5" />
+      <dependency org="org.powermock" name="powermock-module-junit4" rev="1.6.5" />
+      <dependency org="org.powermock" name="powermock-module-junit4-common" rev="1.6.5" />
+      <dependency org="org.easymock" name="easymock" rev="3.0" />
+      <dependency org="org.javassist" name="javassist" rev="3.18.2-GA" />
+      <dependency org="cglib" name="cglib" rev="2.2.2" />
+      <dependency org="org.objenesis" name="objenesis" rev="1.2"/>
+      <dependency org="asm" name="asm" rev="3.3.1" />
+      <dependency org="log4j" name="log4j" rev="1.2.16" />
+      <dependency org="dom4j" name="dom4j" rev="1.5.2" />
+      <dependency org="org.json" name="json" rev="20090211" />
+      <dependency org="org.apache.httpcomponents" name="httpmime" rev="4.5.8" />
+      <!-- Doclet Requirements -->
+      <dependency org="com.tenxerconsulting" name="swagger-doclet" rev="1.1.3" />
+    </dependencies>
+</ivy-module>
