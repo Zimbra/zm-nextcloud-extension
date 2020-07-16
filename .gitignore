@@ -8,3 +8,7 @@ openjdk*
 java*
 META-INF
 out/
+/bin/
+.classpath
+.project
+.settings/

@@ -19,43 +19,44 @@ along with this program.  If not, see http://www.gnu.org/licenses/.
 
 package com.zimbra.nextcloud;
 
-import com.github.sardine.impl.io.ContentLengthInputStream;
-import com.zimbra.common.service.ServiceException;
-import com.zimbra.common.util.L10nUtil;
-import com.zimbra.common.util.ZimbraCookie;
-import com.zimbra.common.util.ZimbraLog;
-import com.zimbra.cs.account.*;
-import com.zimbra.cs.extension.ExtensionHttpHandler;
-import com.zimbra.common.util.L10nUtil.MsgKey;
+import java.io.File;
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.xml.namespace.QName;
 
-import java.io.*;
-
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.file.StandardCopyOption;
-import java.util.*;
-
-import com.zimbra.cs.service.AuthProvider;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
-import org.apache.http.HttpResponse;
-import org.json.JSONObject;
 import org.json.JSONArray;
+import org.json.JSONObject;
 
-import javax.xml.namespace.QName;
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.List;
-
-import com.zimbra.oauth.handlers.impl.NextCloudTokenHandler;
 import com.github.sardine.DavResource;
 import com.github.sardine.impl.SardineImpl;
+import com.github.sardine.impl.io.ContentLengthInputStream;
+import com.zimbra.common.service.ServiceException;
+import com.zimbra.common.util.L10nUtil;
+import com.zimbra.common.util.L10nUtil.MsgKey;
+import com.zimbra.common.util.ZimbraCookie;
+import com.zimbra.common.util.ZimbraLog;
+import com.zimbra.cs.account.Account;
+import com.zimbra.cs.account.AuthToken;
+import com.zimbra.cs.account.AuthTokenException;
+import com.zimbra.cs.account.Provisioning;
+import com.zimbra.cs.account.ZimbraAuthToken;
+import com.zimbra.cs.extension.ExtensionHttpHandler;
+import com.zimbra.cs.service.AuthProvider;
+import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
 
 public class Nextcloud extends ExtensionHttpHandler {
 
@@ -170,7 +171,7 @@ public class Nextcloud extends ExtensionHttpHandler {
                             resp.setHeader("Content-Disposition", header.getValue());
                         }
                     }
-                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used. 
+                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used.
                     //is.transferTo(resp.getOutputStream());
                     IOUtils.copy(is,resp.getOutputStream());
                     is.close();
