@@ -196,6 +196,7 @@ public class Nextcloud extends ExtensionHttpHandler {
                     String shareType = receivedJSON.getString("shareType");
                     String password = receivedJSON.getString("password");
                     String expiryDate = receivedJSON.getString("expiryDate");
+                    path = receivedJSON.getString("nextcloudPath");
                     resp.setContentType("application/json");
                     resp.setCharacterEncoding("UTF-8");
                     //status is set from within createShare method
