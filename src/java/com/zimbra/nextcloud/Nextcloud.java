@@ -294,47 +294,51 @@ public class Nextcloud extends ExtensionHttpHandler {
             File targetFile = File.createTempFile("sardine", ".html", new File("/tmp"));
             File targetPdf = new File(targetFile.toString().replace(".html", ".pdf"));
             try {
+                URL url;
+                String uri;
                 HttpURLConnection connection = null;
-
-                String uri = req.getScheme() + "://" +
-                        req.getServerName() +
-                        ":" + req.getServerPort() +
-                        "/h/printmessage?id=" + mailObject.getString("id");
-
-                URL url = new URL(uri);
-
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setDoOutput(true);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestMethod("GET");
-                connection.setRequestProperty("charset", "utf-8");
-                connection.setRequestProperty("Content-Length", "0");
-                connection.setRequestProperty("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
-                connection.setUseCaches(false);
-
-                if (connection.getResponseCode() == 200) {
-                    java.nio.file.Files.copy(
-                            connection.getInputStream(),
-                            targetFile.toPath(),
-                            StandardCopyOption.REPLACE_EXISTING);
-                } else {
-                    throw new Exception("com.zimbra.nextcloud cannot fetch email");
-                }
-
-                /*
-                Install wkhtmltopdf from  https://wkhtmltopdf.org/downloads.html not from OS repo!!
-                ln -s /usr/local/bin/wkhtmltopdf /bin/wkhtmltopdf
-                 */
-
-                List<String> cmd = new ArrayList<String>(Arrays.asList("wkhtmltopdf"));
-                cmd.add(targetFile.getAbsolutePath());
-                cmd.add(targetPdf.getAbsolutePath());
-                execCommand(cmd);
-                targetFile.delete();
                 SardineImpl sardine = new SardineImpl(accessToken);
-                sardine.put(Path + fileName.replace(".pdf", "") + ".pdf", targetPdf, "application/pdf");
-                targetPdf.delete();
+
+                if (!"skip".equals(mailObject.getString("id"))) {
+                    uri = req.getScheme() + "://" +
+                            req.getServerName() +
+                            ":" + req.getServerPort() +
+                            "/h/printmessage?id=" + mailObject.getString("id");
+
+                    url = new URL(uri);
+
+                    connection = (HttpURLConnection) url.openConnection();
+                    connection.setDoOutput(true);
+                    connection.setUseCaches(false);
+                    connection.setInstanceFollowRedirects(true);
+                    connection.setRequestMethod("GET");
+                    connection.setRequestProperty("charset", "utf-8");
+                    connection.setRequestProperty("Content-Length", "0");
+                    connection.setRequestProperty("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
+                    connection.setUseCaches(false);
+
+                    if (connection.getResponseCode() == 200) {
+                        java.nio.file.Files.copy(
+                                connection.getInputStream(),
+                                targetFile.toPath(),
+                                StandardCopyOption.REPLACE_EXISTING);
+                    } else {
+                        throw new Exception("com.zimbra.nextcloud cannot fetch email");
+                    }
+
+                   /*
+                   Install wkhtmltopdf from  https://wkhtmltopdf.org/downloads.html not from OS repo!!
+                   ln -s /usr/local/bin/wkhtmltopdf /bin/wkhtmltopdf
+                    */
+
+                    List<String> cmd = new ArrayList<String>(Arrays.asList("wkhtmltopdf"));
+                    cmd.add(targetFile.getAbsolutePath());
+                    cmd.add(targetPdf.getAbsolutePath());
+                    execCommand(cmd);
+                    targetFile.delete();
+                    sardine.put(Path + fileName.replace(".pdf", "") + ".pdf", targetPdf, "application/pdf");
+                    targetPdf.delete();
+                }
 
                 JSONArray attachments = null;
                 try {
@@ -367,7 +371,12 @@ public class Nextcloud extends ExtensionHttpHandler {
                             sardine = new SardineImpl(accessToken);
                             //having to do a replace for spaces, maybe a bug in Sardine.
                             String attachmentFileName = uriEncode(attachment.getString("filename")).replace("%2F", "/");
-                            sardine.put(Path + fileName.replace(".pdf", "") + '-' + attachmentFileName, connection.getInputStream());
+                            if (!"skip".equals(mailObject.getString("id"))) {
+                                sardine.put(Path + fileName.replace(".pdf", "") + '-' + attachmentFileName, connection.getInputStream());
+                            } else {
+                                sardine.put(Path + attachmentFileName, connection.getInputStream());
+                            }
+
                         } else {
                             throw new Exception("com.zimbra.nextcloud cannot fetch attachment");
                         }
