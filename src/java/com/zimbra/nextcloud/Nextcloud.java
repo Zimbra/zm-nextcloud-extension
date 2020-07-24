@@ -19,44 +19,46 @@ along with this program.  If not, see http://www.gnu.org/licenses/.
 
 package com.zimbra.nextcloud;
 
-import java.io.File;
-import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.file.StandardCopyOption;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
+import com.github.sardine.impl.io.ContentLengthInputStream;
+import com.zimbra.common.service.ServiceException;
+import com.zimbra.common.util.L10nUtil;
+import com.zimbra.common.util.ZimbraCookie;
+import com.zimbra.common.util.ZimbraLog;
+import com.zimbra.cs.account.*;
+import com.zimbra.cs.extension.ExtensionHttpHandler;
+import com.zimbra.common.util.L10nUtil.MsgKey;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import javax.xml.namespace.QName;
 
+import java.io.*;
+
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.StandardCopyOption;
+import java.util.*;
+
+import com.zimbra.cs.service.AuthProvider;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
-import org.json.JSONArray;
+import org.apache.http.HttpResponse;
 import org.json.JSONObject;
+import org.json.JSONArray;
 
+import javax.xml.namespace.QName;
+import java.io.IOException;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.List;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
+import com.zimbra.oauth.handlers.impl.NextCloudTokenHandler;
 import com.github.sardine.DavResource;
 import com.github.sardine.impl.SardineImpl;
-import com.github.sardine.impl.io.ContentLengthInputStream;
-import com.zimbra.common.service.ServiceException;
-import com.zimbra.common.util.L10nUtil;
-import com.zimbra.common.util.L10nUtil.MsgKey;
-import com.zimbra.common.util.ZimbraCookie;
-import com.zimbra.common.util.ZimbraLog;
-import com.zimbra.cs.account.Account;
-import com.zimbra.cs.account.AuthToken;
-import com.zimbra.cs.account.AuthTokenException;
-import com.zimbra.cs.account.Provisioning;
-import com.zimbra.cs.account.ZimbraAuthToken;
-import com.zimbra.cs.extension.ExtensionHttpHandler;
-import com.zimbra.cs.service.AuthProvider;
-import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
 
 public class Nextcloud extends ExtensionHttpHandler {
 
@@ -171,9 +173,9 @@ public class Nextcloud extends ExtensionHttpHandler {
                             resp.setHeader("Content-Disposition", header.getValue());
                         }
                     }
-                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used.
+                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used. 
                     //is.transferTo(resp.getOutputStream());
-                    IOUtils.copy(is,resp.getOutputStream());
+                    IOUtils.copy(is, resp.getOutputStream());
                     is.close();
                     break;
                 case "put":
@@ -188,6 +190,16 @@ public class Nextcloud extends ExtensionHttpHandler {
                     } else {
                         resp.setStatus(500);
                     }
+                    break;
+                case "createShare":
+                    String OCSPath = receivedJSON.getString("OCSPath");
+                    String shareType = receivedJSON.getString("shareType");
+                    String password = receivedJSON.getString("password");
+                    String expiryDate = receivedJSON.getString("expiryDate");
+                    resp.setContentType("application/json");
+                    resp.setCharacterEncoding("UTF-8");
+                    //status is set from within createShare method
+                    resp.getOutputStream().print(createShare(accessToken, OCSPath, path, shareType, password, expiryDate, resp));
                     break;
                 default:
                     resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
@@ -204,8 +216,6 @@ public class Nextcloud extends ExtensionHttpHandler {
      * Retrieves authToken from header or cookie.<br>
      * JWT is searched for as priority, then cookie.
      *
-     * @param cookies Request cookies
-     * @param headers Request headers
      * @return An auth token
      * @throws ServiceException If there are issues creating the auth token
      */
@@ -475,6 +485,196 @@ public class Nextcloud extends ExtensionHttpHandler {
             return clean;
         } catch (Exception ex) {
             return ex.toString();
+        }
+    }
+
+    /* Method copied from https://github.com/zimbra-community/OCS
+
+    example test in javascript:
+
+      let fakeEmailData = {}
+      fakeEmailData.nextcloudAction = "createShare";
+      fakeEmailData.nextcloudPath = "/Readme.md"; //path to file/folder to share
+      fakeEmailData.shareType = "3"; //3 = public link share
+      fakeEmailData.password = "";
+      var expiryDays = 2; //expire in 2 days
+      var expiration = (new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000)).toISOString().slice(0,10);
+      fakeEmailData.expiryDate = ""; //or set to `expiration` variable as above
+      fakeEmailData.OCSPath = "https://nextcloudtest.barrydegraaff.tk/nextcloud/ocs/v1.php/apps/files_sharing/api/v1/shares";
+      fakeEmailData.nextcloudDAVPath = "";
+      var request = new XMLHttpRequest();
+      var url = '/service/extension/nextcloud';
+      var formData = new FormData();
+      formData.append("jsondata", JSON.stringify(fakeEmailData));
+      request.open('POST', url);
+      request.onreadystatechange = function (e) {
+         if (request.readyState == 4) {
+            if (request.status == 200) {
+               const OCSResponse = JSON.parse(request.responseText);
+               console.log(OCSResponse);
+            }
+            if (request.status == 400) {
+               const OCSResponse = JSON.parse(request.responseText);
+               console.log(OCSResponse);
+            }
+         }
+      }
+      request.send(formData);
+
+      example HTTP 200 - OK response: {"statuscode":100,"id":"7","message":"","url":"https://nextcloudtest.barrydegraaff.tk/nextcloud/index.php/s/W6TxAbq853itsRa","status":"ok","token":""}
+
+      example HTTP 400 error response: {"statuscode":400,"id":0,"message":"","url":"Could not create share. ","status":"ok","token":""}
+    */
+    public String createShare(String accessToken, String OCSPath, String path, String shareType, String password, String expiryDate, HttpServletResponse resp) {
+        try {
+            final String urlParameters = "path=" + path + "&shareType=" + shareType + "&password=" + password;
+
+            byte[] postData = urlParameters.getBytes(StandardCharsets.UTF_8);
+            int postDataLength = postData.length;
+
+            URL url = new URL(OCSPath);
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+            conn.setDoOutput(true);
+            conn.setInstanceFollowRedirects(true);
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+            conn.setRequestProperty("charset", "utf-8");
+            conn.setRequestProperty("Content-Length", Integer.toString(postDataLength));
+            conn.setRequestProperty("OCS-APIRequest", "true");
+            conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+            conn.setUseCaches(false);
+
+            try (DataOutputStream wr = new DataOutputStream(conn.getOutputStream())) {
+                wr.write(postData);
+            }
+
+            InputStream _is;
+            Boolean isError = false;
+            if (conn.getResponseCode() < 400) {
+                _is = conn.getInputStream();
+                isError = false;
+            } else {
+                _is = conn.getErrorStream();
+                isError = true;
+            }
+
+            BufferedReader in = new BufferedReader(
+                    new InputStreamReader(_is));
+
+            String inputLine;
+            StringBuffer responseTxt = new StringBuffer();
+
+            while ((inputLine = in.readLine()) != null) {
+                responseTxt.append(inputLine);
+            }
+            in.close();
+
+            Pattern pattern;
+            if (isError) {
+                pattern = Pattern.compile("<message>(.+?)</message>");
+            } else {
+                pattern = Pattern.compile("<url>(.+?)</url>");
+            }
+            Matcher matcher = pattern.matcher(responseTxt.toString());
+            matcher.find();
+            final String result = matcher.group(1);
+
+            if (!isError) {
+                pattern = Pattern.compile("<id>(.+?)</id>");
+            }
+            matcher = pattern.matcher(responseTxt.toString());
+            matcher.find();
+            final String id = matcher.group(1);
+
+            //Implement Expiry date and update Password
+            //And empty password or expiryDate will remove the property from the share
+            //https://docs.nextcloud.com/server/12/developer_manual/core/ocs-share-api.html#update-share
+            String errorMessage = "";
+            try {
+
+                final String[] updateArguments = {"expireDate=" + expiryDate, "password=" + password};
+                for (String urlParameter : updateArguments) {
+                    postData = urlParameter.getBytes(StandardCharsets.UTF_8);
+                    postDataLength = postData.length;
+                    String requestUrl = OCSPath + "/" + id;
+
+                    url = new URL(requestUrl);
+                    conn = (HttpURLConnection) url.openConnection();
+
+                    conn.setDoOutput(true);
+                    conn.setInstanceFollowRedirects(true);
+                    conn.setRequestMethod("PUT");
+                    conn.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
+                    conn.setRequestProperty("charset", "utf-8");
+                    conn.setRequestProperty("Content-Length", Integer.toString(postDataLength));
+                    conn.setRequestProperty("OCS-APIRequest", "true");
+                    conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+                    conn.setUseCaches(false);
+
+                    try (DataOutputStream wr = new DataOutputStream(conn.getOutputStream())) {
+                        wr.write(postData);
+                    }
+
+                    isError = false;
+                    if (conn.getResponseCode() < 400) {
+                        _is = conn.getInputStream();
+                        isError = false;
+                    } else {
+                        _is = conn.getErrorStream();
+                        isError = true;
+                    }
+
+                    in = new BufferedReader(
+                            new InputStreamReader(_is));
+
+                    responseTxt = new StringBuffer();
+
+                    while ((inputLine = in.readLine()) != null) {
+                        responseTxt.append(inputLine);
+                    }
+                    in.close();
+                    if (!isError) {
+                        try {
+                            pattern = Pattern.compile("<message>(.+?)</message>");
+                            matcher = pattern.matcher(responseTxt.toString());
+                            matcher.find();
+                            if (!"OK".equals(matcher.group(1))) {
+                                errorMessage += matcher.group(1) + ". ";
+                            }
+                        } catch (Exception e) {
+                            //ignore https://github.com/Zimbra-Community/owncloud-zimlet/issues/148
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                errorMessage += e.toString();
+            }
+
+                /*The result variable holds the result from the `Create Share` request. If it starts with http it means the request was OK,
+                otherwise it will hold the error message.
+
+                Not all share properties can be set with `Create Share` and creating a share on an object that is already shared, will not
+                give an error, but does not do anything.
+
+                Therefore we always do 2 `Update Share` requests as well, to set/remove the password and expiry date.
+
+                The errorMessage variable holds the result from the Update Share` requests, in case it is empty, it means all went OK
+                and the result from `Create Share` can be trusted. Otherwise it holds concatenated error messages, that should be displayed
+                to the user. The link share url would not be reliable in this case.
+                 */
+            if ("".equals(errorMessage)) {
+                resp.setStatus(200);
+                return "{\"statuscode\":100,\"id\":\"" + id + "\",\"message\":\"\",\"url\":\"" + result + "\",\"status\":\"ok\",\"token\":\"\"}";
+            } else {
+                //result holds the url of the created share, if all went well, or also an error message if the sharing failed
+                resp.setStatus(400);
+                return "{\"statuscode\":400,\"id\":\"" + id + "\",\"message\":\"\",\"url\":\"" + errorMessage + "\",\"status\":\"ok\",\"token\":\"\"}";
+            }
+        } catch (
+                Exception ex) {
+            resp.setStatus(400);
+            return "{\"statuscode\":400,\"id\":0,\"message\":\"\",\"url\":\"" + "Could not create share. " + "\",\"status\":\"ok\",\"token\":\"\"}";
         }
     }
 }
