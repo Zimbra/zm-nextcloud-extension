@@ -82,40 +82,7 @@ public class Nextcloud extends ExtensionHttpHandler {
      */
     @Override
     public void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException, ServletException {
-        AuthToken authToken = null;
-        Account account = null;
-        String accessToken = null;
-
-        try {
-            final String cookieString = getFromCookie(req.getCookies(),
-                    ZimbraCookie.authTokenCookieName(false));
-            authToken = getAuthToken(cookieString);
-            account = getAccount(authToken);
-            accessToken = NextCloudTokenHandler.refreshAccessToken(account, "nextcloud");
-
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        if (req.getParameter("url") != null) {
-
-
-            //work around for cors OPTIONS request not permitted in Nextcloud ATM
-            resp.getOutputStream().print("<!doctype html>");
-            resp.getOutputStream().print("<html lang=\"en\">");
-            resp.getOutputStream().print("<head>");
-            resp.getOutputStream().print("  <meta charset=\"utf-8\">");
-            resp.getOutputStream().print("  <!--ZM-NC-TOKEN-OK-->");
-            resp.getOutputStream().print("</head>");
-            resp.getOutputStream().print("<body><form id=\"ncForm\" action=\"" + req.getParameter("url") + "\" method=\"post\"><input type=\"hidden\" name=\"token\" value=\"" + accessToken + "\"></form>");
-            resp.getOutputStream().print("  <script>");
-            resp.getOutputStream().print("  document.getElementById(\"ncForm\").submit();");
-            resp.getOutputStream().print("</script>");
-            resp.getOutputStream().print("</body>");
-            resp.getOutputStream().print("</html>");
-        } else {
-            resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
-        }
+       resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
     }
 
     /**
@@ -140,7 +107,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             account = getAccount(authToken);
             accessToken = NextCloudTokenHandler.refreshAccessToken(account, "nextcloud");
         } catch (Exception e) {
-            e.printStackTrace();
+            ZimbraLog.extensions.info(e);
         }
 
         try {
@@ -209,7 +176,7 @@ public class Nextcloud extends ExtensionHttpHandler {
 
         } catch (
                 Exception e) {
-            e.printStackTrace();
+            ZimbraLog.extensions.info(e);
         }
     }
 
@@ -387,12 +354,12 @@ public class Nextcloud extends ExtensionHttpHandler {
             } catch (Exception e) {
                 targetFile.delete();
                 targetPdf.delete();
-                e.printStackTrace();
+                ZimbraLog.extensions.info(e);
                 return false;
             }
         } catch (Exception e) {
             System.out.println("com.zimbra.nextcloud seems we have no access to /tmp on this server....");
-            e.printStackTrace();
+            ZimbraLog.extensions.info(e);
             return false;
         }
     }
@@ -403,7 +370,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             Process p = pb.start();
             p.waitFor();
         } catch (Exception e) {
-            e.printStackTrace();
+            ZimbraLog.extensions.info(e);
         }
     }
 
@@ -469,8 +436,8 @@ public class Nextcloud extends ExtensionHttpHandler {
                 arrayResponse.put(res);
             }
             return arrayResponse;
-        } catch (Exception ex) {
-            ex.printStackTrace();
+        } catch (Exception e) {
+            ZimbraLog.extensions.info(e);
             return null;
         }
     }
@@ -484,8 +451,9 @@ public class Nextcloud extends ExtensionHttpHandler {
         try {
             String clean = java.net.URLEncoder.encode(dirty, "UTF-8");
             return clean.replaceAll("\\+", "%20");
-        } catch (Exception ex) {
-            return ex.toString();
+        } catch (Exception e) {
+            ZimbraLog.extensions.info(e);
+            return null;
         }
     }
 
@@ -493,8 +461,9 @@ public class Nextcloud extends ExtensionHttpHandler {
         try {
             String clean = java.net.URLDecoder.decode(dirty, "UTF-8");
             return clean;
-        } catch (Exception ex) {
-            return ex.toString();
+        } catch (Exception e) {
+            ZimbraLog.extensions.info(e);
+            return null;
         }
     }
 
