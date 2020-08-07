@@ -303,7 +303,7 @@ public class Nextcloud extends ExtensionHttpHandler {
                     cmd.add(targetPdf.getAbsolutePath());
                     execCommand(cmd);
                     targetFile.delete();
-                    sardine.put(Path + fileName.replace(".pdf", "") + ".pdf", targetPdf, "application/pdf");
+                    sardine.put(Path + fileName + ".pdf", targetPdf, "application/pdf");
                     targetPdf.delete();
                 }
 
@@ -339,7 +339,7 @@ public class Nextcloud extends ExtensionHttpHandler {
                             //having to do a replace for spaces, maybe a bug in Sardine.
                             String attachmentFileName = uriEncode(attachment.getString("filename")).replace("%2F", "/");
                             if (!"skip".equals(mailObject.getString("id"))) {
-                                sardine.put(Path + fileName.replace(".pdf", "") + '-' + attachmentFileName, connection.getInputStream());
+                                sardine.put(Path + fileName + '-' + attachmentFileName, connection.getInputStream());
                             } else {
                                 sardine.put(Path + attachmentFileName, connection.getInputStream());
                             }
