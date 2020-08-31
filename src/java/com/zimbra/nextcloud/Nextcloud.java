@@ -19,48 +19,66 @@ along with this program.  If not, see http://www.gnu.org/licenses/.
 
 package com.zimbra.nextcloud;
 
-import com.github.sardine.impl.io.ContentLengthInputStream;
-import com.zimbra.common.service.ServiceException;
-import com.zimbra.common.util.L10nUtil;
-import com.zimbra.common.util.ZimbraCookie;
-import com.zimbra.common.util.ZimbraLog;
-import com.zimbra.cs.account.*;
-import com.zimbra.cs.extension.ExtensionHttpHandler;
-import com.zimbra.common.util.L10nUtil.MsgKey;
+import java.io.BufferedReader;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import javax.xml.namespace.QName;
 
-import java.io.*;
-
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.StandardCopyOption;
-import java.util.*;
-
-import com.zimbra.cs.service.AuthProvider;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
-import org.apache.http.HttpResponse;
-import org.json.JSONObject;
 import org.json.JSONArray;
+import org.json.JSONObject;
 
-import javax.xml.namespace.QName;
-import java.io.IOException;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.List;
-import java.util.regex.Pattern;
-import java.util.regex.Matcher;
-
-import com.zimbra.oauth.handlers.impl.NextCloudTokenHandler;
 import com.github.sardine.DavResource;
 import com.github.sardine.impl.SardineImpl;
+import com.github.sardine.impl.io.ContentLengthInputStream;
+import com.zimbra.common.service.ServiceException;
+import com.zimbra.common.util.L10nUtil;
+import com.zimbra.common.util.L10nUtil.MsgKey;
+import com.zimbra.common.util.ZimbraCookie;
+import com.zimbra.common.util.ZimbraLog;
+import com.zimbra.cs.account.Account;
+import com.zimbra.cs.account.AuthToken;
+import com.zimbra.cs.account.AuthTokenException;
+import com.zimbra.cs.account.Provisioning;
+import com.zimbra.cs.account.Server;
+import com.zimbra.cs.account.ZimbraAuthToken;
+import com.zimbra.cs.extension.ExtensionHttpHandler;
+import com.zimbra.cs.httpclient.URLUtil;
+import com.zimbra.cs.service.AuthProvider;
+import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
 
 public class Nextcloud extends ExtensionHttpHandler {
+
+    static {
+        //for localhost testing only
+        javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(
+                new javax.net.ssl.HostnameVerifier() {
+
+            @Override
+            public boolean verify(String hostname,
+                    javax.net.ssl.SSLSession sslSession) {
+
+                return true;
+            }
+        });
+    }
+
 
     /**
      * The path under which the handler is registered for an extension.
@@ -82,7 +100,7 @@ public class Nextcloud extends ExtensionHttpHandler {
      */
     @Override
     public void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException, ServletException {
-       resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
+        resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
     }
 
     /**
@@ -99,6 +117,7 @@ public class Nextcloud extends ExtensionHttpHandler {
         AuthToken authToken = null;
         Account account = null;
         String accessToken = null;
+        Server server = null;
 
         try {
             final String cookieString = getFromCookie(req.getCookies(),
@@ -106,8 +125,10 @@ public class Nextcloud extends ExtensionHttpHandler {
             authToken = getAuthToken(cookieString);
             account = getAccount(authToken);
             accessToken = NextCloudTokenHandler.refreshAccessToken(account, "nextcloud");
+            server = Provisioning.getInstance().getServer(account);
+            ZimbraLog.extensions.info("Refresh token :" + accessToken + " " + server.getName());
         } catch (Exception e) {
-            ZimbraLog.extensions.info(e);
+            ZimbraLog.extensions.info("Error fetching refresh token " ,  e);
         }
 
         try {
@@ -140,19 +161,20 @@ public class Nextcloud extends ExtensionHttpHandler {
                             resp.setHeader("Content-Disposition", header.getValue());
                         }
                     }
-                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used. 
+                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used.
                     //is.transferTo(resp.getOutputStream());
                     IOUtils.copy(is, resp.getOutputStream());
                     is.close();
                     break;
                 case "put":
                     String name = receivedJSON.getString("nextcloudFilename");
+                    ZimbraLog.extensions.info("PUT action");
                     //having to do a replace for spaces, maybe a bug in Sardine.
                     name = uriEncode(name).replace("%2F", "/");
                     resp.setContentType("application/json");
                     resp.setCharacterEncoding("UTF-8");
                     resp.getOutputStream().print(receivedJSON.toString());
-                    if (fetchMail(req, authToken, accessToken, path, name, receivedJSON)) {
+                    if (fetchMail(req, authToken, accessToken, path, name, receivedJSON, server)) {
                         resp.setStatus(200);
                     } else {
                         resp.setStatus(500);
@@ -256,24 +278,54 @@ public class Nextcloud extends ExtensionHttpHandler {
     }
 
     public boolean fetchMail(HttpServletRequest req, AuthToken authToken, String
-            accessToken, String Path, String fileName, JSONObject mailObject) {
+            accessToken, String Path, String fileName, JSONObject mailObject, Server server) {
         try {
-            File targetFile = File.createTempFile("sardine", ".html", new File("/tmp"));
-            File targetPdf = new File(targetFile.toString().replace(".html", ".pdf"));
+            URL url;
+            String uri;
+            HttpURLConnection connection = null;
+            SardineImpl sardine = new SardineImpl(accessToken);
+            ZimbraLog.extensions.info(req.getServerName() + ":"  + server.getName());
+
+            if (!"skip".equals(mailObject.getString("id"))) {
+                String path = "/service/home/~/?auth=co&id=" + mailObject.getString("id") + "&disp=a";
+                uri = URLUtil.getServiceURL(server, path, true);
+                ZimbraLog.extensions.info(uri);
+                url = new URL(uri);
+
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setDoOutput(true);
+                connection.setUseCaches(false);
+                connection.setInstanceFollowRedirects(true);
+                connection.setRequestMethod("GET");
+                connection.setRequestProperty("charset", "utf-8");
+                connection.setRequestProperty("Content-Length", "0");
+                connection.setRequestProperty("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
+                connection.setUseCaches(false);
+
+                if (connection.getResponseCode() == 200) {
+                    sardine = new SardineImpl(accessToken);
+                    sardine.put(Path + fileName + ".eml", connection.getInputStream());
+                } else {
+                    throw new Exception("com.zimbra.nextcloud cannot fetch mail item");
+                }
+            }
+
+
+            JSONArray attachments = null;
             try {
-                URL url;
-                String uri;
-                HttpURLConnection connection = null;
-                SardineImpl sardine = new SardineImpl(accessToken);
+                attachments = mailObject.getJSONArray("attachments");
+            } catch (Exception e) {
+                ZimbraLog.extensions.errorQuietly("Error uploading attachment", e);
+            }
 
-                if (!"skip".equals(mailObject.getString("id"))) {
-                    uri = req.getScheme() + "://" +
-                            req.getServerName() +
-                            ":" + req.getServerPort() +
-                            "/h/printmessage?id=" + mailObject.getString("id");
-
+            //fetch and upload attachments
+            if (attachments != null) {
+                for (int i = 0; i < attachments.length(); i++) {
+                    JSONObject attachment = attachments.getJSONObject(i);
+                    String path =  "/" + attachment.getString("url") + "&disp=a";
+                    uri = URLUtil.getServiceURL(server, path, true);
                     url = new URL(uri);
-
+                    ZimbraLog.extensions.info(uri);
                     connection = (HttpURLConnection) url.openConnection();
                     connection.setDoOutput(true);
                     connection.setUseCaches(false);
@@ -285,92 +337,25 @@ public class Nextcloud extends ExtensionHttpHandler {
                     connection.setUseCaches(false);
 
                     if (connection.getResponseCode() == 200) {
-                        java.nio.file.Files.copy(
-                                connection.getInputStream(),
-                                targetFile.toPath(),
-                                StandardCopyOption.REPLACE_EXISTING);
-                    } else {
-                        throw new Exception("com.zimbra.nextcloud cannot fetch email");
-                    }
-
-                   /*
-                   Install wkhtmltopdf from  https://wkhtmltopdf.org/downloads.html not from OS repo!!
-                   ln -s /usr/local/bin/wkhtmltopdf /bin/wkhtmltopdf
-                    */
-
-                    List<String> cmd = new ArrayList<String>(Arrays.asList("wkhtmltopdf"));
-                    cmd.add(targetFile.getAbsolutePath());
-                    cmd.add(targetPdf.getAbsolutePath());
-                    execCommand(cmd);
-                    targetFile.delete();
-                    sardine.put(Path + fileName + ".pdf", targetPdf, "application/pdf");
-                    targetPdf.delete();
-                }
-
-                JSONArray attachments = null;
-                try {
-                    attachments = mailObject.getJSONArray("attachments");
-                } catch (Exception e) {
-                }
-
-                //fetch and upload attachments
-                if (attachments != null) {
-                    for (int i = 0; i < attachments.length(); i++) {
-                        JSONObject attachment = attachments.getJSONObject(i);
-                        uri = req.getScheme() + "://" +
-                                req.getServerName() +
-                                ":" + req.getServerPort() +
-                                attachment.getString("url") + "&disp=a";
-
-                        url = new URL(uri);
-
-                        connection = (HttpURLConnection) url.openConnection();
-                        connection.setDoOutput(true);
-                        connection.setUseCaches(false);
-                        connection.setInstanceFollowRedirects(true);
-                        connection.setRequestMethod("GET");
-                        connection.setRequestProperty("charset", "utf-8");
-                        connection.setRequestProperty("Content-Length", "0");
-                        connection.setRequestProperty("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
-                        connection.setUseCaches(false);
-
-                        if (connection.getResponseCode() == 200) {
-                            sardine = new SardineImpl(accessToken);
-                            //having to do a replace for spaces, maybe a bug in Sardine.
-                            String attachmentFileName = uriEncode(attachment.getString("filename")).replace("%2F", "/");
-                            if (!"skip".equals(mailObject.getString("id"))) {
-                                sardine.put(Path + fileName + '-' + attachmentFileName, connection.getInputStream());
-                            } else {
-                                sardine.put(Path + attachmentFileName, connection.getInputStream());
-                            }
-
+                        sardine = new SardineImpl(accessToken);
+                        //having to do a replace for spaces, maybe a bug in Sardine.
+                        String attachmentFileName = uriEncode(attachment.getString("filename")).replace("%2F", "/");
+                        if (!"skip".equals(mailObject.getString("id"))) {
+                            sardine.put(Path + fileName + '-' + attachmentFileName, connection.getInputStream());
                         } else {
-                            throw new Exception("com.zimbra.nextcloud cannot fetch attachment");
+                            sardine.put(Path + attachmentFileName, connection.getInputStream());
                         }
+
+                    } else {
+                        throw new Exception("com.zimbra.nextcloud cannot fetch attachment");
                     }
                 }
-
-                return true;
-            } catch (Exception e) {
-                targetFile.delete();
-                targetPdf.delete();
-                ZimbraLog.extensions.info(e);
-                return false;
             }
-        } catch (Exception e) {
-            System.out.println("com.zimbra.nextcloud seems we have no access to /tmp on this server....");
-            ZimbraLog.extensions.info(e);
-            return false;
-        }
-    }
 
-    private static void execCommand(List<String> command) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder(command);
-            Process p = pb.start();
-            p.waitFor();
+            return true;
         } catch (Exception e) {
-            ZimbraLog.extensions.info(e);
+            ZimbraLog.extensions.info("Error : ", e);
+            return false;
         }
     }
 
