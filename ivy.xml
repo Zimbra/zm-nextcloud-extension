@@ -26,7 +26,7 @@
       <dependency org="zimbra" name="zm-client" rev="latest.integration" />
       <dependency org="zimbra" name="zm-soap" rev="latest.integration" />
       <dependency org="zimbra" name="zm-store" rev="latest.integration" />
-      <dependency org="zimbra" name="zm-oauth-social-common" rev="1.0"/>
+      <dependency org="zimbra" name="zm-oauth-social" rev="latest.integration" />
       <!-- Transitive Requirements -->
       <dependency org="com.fasterxml.jackson.core" name="jackson-core" rev="2.9.2"/>
       <dependency org="com.fasterxml.jackson.core" name="jackson-annotations" rev="2.9.2"/>
