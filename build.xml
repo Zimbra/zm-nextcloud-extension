@@ -10,6 +10,9 @@
   <property name="build.dir" location="build"/>
   <property name="classes.dir" location="${build.dir}/classes"/>
   <property name="extension.deploy.dir" location="${zimbra.home.dir}/lib/ext/${ext.name}"/>
+  <property name="nc.ext.patch.revision" value="1" />
+  <property name="nc.ext.patch.version"
+      value="${zimbra.buildinfo.majorversion}.${zimbra.buildinfo.minorversion}.${zimbra.buildinfo.microversion}"/>
 
   <target name="build-init">
     <mkdir dir="${build.classes.dir}"/>
@@ -26,9 +29,9 @@
     <delete dir="${extension.deploy.dir}"/>
     <mkdir dir="${extension.deploy.dir}"/>
     <ivy:install organisation="com.auth0" module="java-jwt" revision="3.2.0" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
-    <ivy:install organisation="com.fasterxml.jackson.core" module="jackson-annotations" revision="2.9.2" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
-    <ivy:install organisation="com.fasterxml.jackson.core" module="jackson-core" revision="2.9.2" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
-    <ivy:install organisation="com.fasterxml.jackson.core" module="jackson-databind" revision="2.9.2" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
+    <ivy:install organisation="com.fasterxml.jackson.core" module="jackson-annotations" revision="2.10.1" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
+    <ivy:install organisation="com.fasterxml.jackson.core" module="jackson-core" revision="2.10.1" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
+    <ivy:install organisation="com.fasterxml.jackson.core" module="jackson-databind" revision="2.10.1" settingsRef="dev.settings" from="chain-resolver" to="build-dist" overwrite="true" transitive="true" type="jar"/>
     <echo> Copying ${build.dir}/${jar.file} and ${dist.dir}/*.jar to ${extension.deploy.dir}</echo>
     <copy todir="${extension.deploy.dir}">
       <fileset dir="${build.dir}" includes="${jar.file}" />
@@ -40,11 +43,26 @@
   <target name="undeploy">
     <delete dir="${extension.deploy.dir}"/>
   </target>
-
-  <!-- clean build directory -->
-  <target name="clean">
-    <delete dir="${build.dir}"/>
+  
+  <target name="pkg" depends="clean-pkg,dist">
+    <exec dir="." executable="./pkg-builder.pl" failonerror="true" >
+    <arg value="-v"/>
+    <arg value="${nc.ext.patch.version}"/>
+    <arg value="-r"/>
+    <arg value="${nc.ext.patch.revision}"/>
+    </exec>
   </target>
+
+  <target name="clean" depends="clean-pkg">
+    <delete dir="build" />
+  </target>
+
+  <target name="clean-pkg">
+    <delete dir="build/dist" />
+    <delete dir="build/stage" />
+  </target>
+
+
 
   <!-- clean build directory and ivy cache -->
   <target name="clean-all" depends="clean">
@@ -53,8 +71,9 @@
 
   <!-- used by packaging scripts -->
   <target name="dist" depends="jar" description="Copies jar to dist dir so that packaging scripts can pick it up from there">
-    <copy todir="${dist.lib.ext.dir}">
-      <fileset dir="${build.dir}" includes="${jar.file}" />
+    <copy todir="${dist.dir}">
+      	  <fileset dir="${build.dir}"/>
+	  <globmapper from="zm-nextcloud-extension-*.jar" to="zm-nextcloud-extension.jar"/>
     </copy>
   </target>
 

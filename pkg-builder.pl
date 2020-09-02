@@ -92,7 +92,7 @@ sub stage_zimbra_nextcloud_service($)
 {
    my $stage_base_dir = shift;
 
-    cpy_file( "build/dist/zm-nextcloud.jar",    "$stage_base_dir/opt/zimbra/lib/ext/zm-nextcloud/zm-nextcloud.jar" );
+    cpy_file( "build/dist/zm-nextcloud-extension.jar",    "$stage_base_dir/opt/zimbra/lib/ext/zm-nextcloud/zm-nextcloud.jar" );
 
    return ["."];
 }
