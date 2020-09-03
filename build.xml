@@ -74,6 +74,10 @@
     <copy todir="${dist.dir}">
       	  <fileset dir="${build.dir}"/>
 	  <globmapper from="zm-nextcloud-extension-*.jar" to="zm-nextcloud-extension.jar"/>
+          <fileset dir="zimlet" includes="zm-x-zimlet-nextcloud.zip" />
+    </copy>
+    <copy todir="${dist.dir}">
+          <fileset dir="zimlet" includes="zm-x-zimlet-nextcloud.zip" />
     </copy>
   </target>
 
