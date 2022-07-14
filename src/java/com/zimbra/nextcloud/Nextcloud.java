@@ -1,6 +1,6 @@
 /*
 
-Copyright (C) 2016-2020  Barry de Graaff
+Copyright (C) 2016-2022  Barry de Graaff
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -39,8 +39,18 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.xml.namespace.QName;
 
+import com.zimbra.common.httpclient.HttpClientUtil;
+import com.zimbra.common.util.ZimbraHttpConnectionManager;
+import com.zimbra.cs.httpclient.HttpProxyUtil;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.util.EntityUtils;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -64,19 +74,20 @@ import com.zimbra.cs.service.AuthProvider;
 import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
 
 public class Nextcloud extends ExtensionHttpHandler {
+    public static final int request_timeout = 15000;
 
     static {
         //for localhost testing only
         javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(
                 new javax.net.ssl.HostnameVerifier() {
 
-            @Override
-            public boolean verify(String hostname,
-                    javax.net.ssl.SSLSession sslSession) {
+                    @Override
+                    public boolean verify(String hostname,
+                                          javax.net.ssl.SSLSession sslSession) {
 
-                return true;
-            }
-        });
+                        return true;
+                    }
+                });
     }
 
 
@@ -128,7 +139,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             server = Provisioning.getInstance().getServer(account);
             ZimbraLog.extensions.info("Refresh token :" + accessToken + " " + server.getName());
         } catch (Exception e) {
-            ZimbraLog.extensions.info("Error fetching refresh token " ,  e);
+            ZimbraLog.extensions.info("Error fetching refresh token ", e);
         }
 
         try {
@@ -190,6 +201,12 @@ public class Nextcloud extends ExtensionHttpHandler {
                     resp.setCharacterEncoding("UTF-8");
                     //status is set from within createShare method
                     resp.getOutputStream().print(createShare(accessToken, OCSPath, path, shareType, password, expiryDate, resp));
+                    break;
+                case "createTalkConv":
+                    JSONObject body = receivedJSON.getJSONObject("body");
+                    resp.setContentType("application/json");
+                    resp.setCharacterEncoding("UTF-8");
+                    resp.getOutputStream().print(doPostRequestToNextcloud(accessToken, body, receivedJSON.getString("NextcloudApiURL")));
                     break;
                 default:
                     resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
@@ -284,7 +301,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             String uri;
             HttpURLConnection connection = null;
             SardineImpl sardine = new SardineImpl(accessToken);
-            ZimbraLog.extensions.info(req.getServerName() + ":"  + server.getName());
+            ZimbraLog.extensions.info(req.getServerName() + ":" + server.getName());
 
             if (!"skip".equals(mailObject.getString("id"))) {
                 String path = "/service/home/~/?auth=co&id=" + mailObject.getString("id") + "&disp=a";
@@ -322,7 +339,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             if (attachments != null) {
                 for (int i = 0; i < attachments.length(); i++) {
                     JSONObject attachment = attachments.getJSONObject(i);
-                    String path =  "/" + attachment.getString("url") + "&disp=a";
+                    String path = "/" + attachment.getString("url") + "&disp=a";
                     uri = URLUtil.getServiceURL(server, path, true);
                     url = new URL(uri);
                     ZimbraLog.extensions.info(uri);
@@ -639,6 +656,63 @@ public class Nextcloud extends ExtensionHttpHandler {
                 Exception ex) {
             resp.setStatus(400);
             return "{\"statuscode\":400,\"id\":0,\"message\":\"\",\"url\":\"" + "Could not create share. " + "\",\"status\":\"ok\",\"token\":\"\"}";
+        }
+    }
+
+
+    /*
+     * Method to send JSON POST requests to Nextcloud
+     * New Nextcloud API's are JSON based, in addition this implements ZimbraHttpConnectionManager which is preferred over HttpURLConnection for manageability of future Java changes.
+     *
+     * example test in javascript (https://nextcloud-talk.readthedocs.io/en/latest/conversation/#creating-a-new-conversation):
+
+      let fakeEmailData = {}
+      fakeEmailData.nextcloudAction = "createTalkConv";
+      fakeEmailData.body = {"roomType":3,"roomName":"mytest"};
+      fakeEmailData.NextcloudApiURL = "https://nextcloud-test.barrydegraaff.nl/nextcloud/ocs/v2.php/apps/spreed/api/v4/room";
+      fakeEmailData.nextcloudPath = "/";
+      fakeEmailData.nextcloudDAVPath = "";
+      var request = new XMLHttpRequest();
+      var url = '/service/extension/nextcloud';
+      var formData = new FormData();
+      formData.append("jsondata", JSON.stringify(fakeEmailData));
+      request.open('POST', url);
+      request.onreadystatechange = function (e) {
+         if (request.readyState == 4) {
+            if (request.status == 200) {
+               const OCSResponse = JSON.parse(request.responseText);
+               console.log(OCSResponse);
+            }
+            if (request.status == 400) {
+               const OCSResponse = JSON.parse(request.responseText);
+               console.log(OCSResponse);
+            }
+         }
+      }
+      request.send(formData);
+     * */
+    public String doPostRequestToNextcloud(String accessToken, JSONObject NextcloudRequestJSON, String NextcloudApiURL) {
+        try {
+            RequestConfig config = RequestConfig.custom().setConnectTimeout(request_timeout).setConnectionRequestTimeout(request_timeout).setSocketTimeout(request_timeout).build();
+            HttpClientBuilder clientBuilder = ZimbraHttpConnectionManager.getExternalHttpConnMgr().newHttpClient().setDefaultRequestConfig(config);
+
+            HttpResponse response;
+            HttpProxyUtil.configureProxy(clientBuilder);
+
+            //prepare post request
+            HttpPost post = new HttpPost(NextcloudApiURL);
+            StringEntity requestEntity = new StringEntity(NextcloudRequestJSON.toString(), ContentType.APPLICATION_JSON);
+            post.setEntity(requestEntity);
+            post.addHeader("OCS-APIRequest", "true");
+            post.addHeader("Authorization", "Bearer " + accessToken);
+            post.addHeader("Accept", "application/json, text/plain, */*");
+
+            response = HttpClientUtil.executeMethod(clientBuilder.build(), post);
+
+            return EntityUtils.toString(response.getEntity());
+        } catch (Exception e) {
+            ZimbraLog.extensions.error("doPostRequestToNextcloud failed for %s, %s", NextcloudRequestJSON.toString(), e.getMessage());
+            return null;
         }
     }
 }
