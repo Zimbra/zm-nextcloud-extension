@@ -1,6 +1,6 @@
 /*
 
-Copyright (C) 2016-2022  Barry de Graaff
+Copyright (C) 2016-2024  Barry de Graaff
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -34,7 +34,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.servlet.ServletException;
-import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.xml.namespace.QName;
@@ -42,6 +41,7 @@ import javax.xml.namespace.QName;
 import com.zimbra.common.httpclient.HttpClientUtil;
 import com.zimbra.common.util.ZimbraHttpConnectionManager;
 import com.zimbra.cs.httpclient.HttpProxyUtil;
+import com.zimbra.cs.servlet.util.AuthUtil;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
@@ -57,39 +57,17 @@ import org.json.JSONObject;
 import com.github.sardine.DavResource;
 import com.github.sardine.impl.SardineImpl;
 import com.github.sardine.impl.io.ContentLengthInputStream;
-import com.zimbra.common.service.ServiceException;
-import com.zimbra.common.util.L10nUtil;
-import com.zimbra.common.util.L10nUtil.MsgKey;
-import com.zimbra.common.util.ZimbraCookie;
 import com.zimbra.common.util.ZimbraLog;
 import com.zimbra.cs.account.Account;
 import com.zimbra.cs.account.AuthToken;
-import com.zimbra.cs.account.AuthTokenException;
 import com.zimbra.cs.account.Provisioning;
 import com.zimbra.cs.account.Server;
-import com.zimbra.cs.account.ZimbraAuthToken;
 import com.zimbra.cs.extension.ExtensionHttpHandler;
 import com.zimbra.cs.httpclient.URLUtil;
-import com.zimbra.cs.service.AuthProvider;
 import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
 
 public class Nextcloud extends ExtensionHttpHandler {
     public static final int request_timeout = 15000;
-
-    static {
-        //for localhost testing only
-        javax.net.ssl.HttpsURLConnection.setDefaultHostnameVerifier(
-                new javax.net.ssl.HostnameVerifier() {
-
-                    @Override
-                    public boolean verify(String hostname,
-                                          javax.net.ssl.SSLSession sslSession) {
-
-                        return true;
-                    }
-                });
-    }
-
 
     /**
      * The path under which the handler is registered for an extension.
@@ -125,173 +103,99 @@ public class Nextcloud extends ExtensionHttpHandler {
     @Override
     public void doPost(HttpServletRequest req, HttpServletResponse resp)
             throws IOException, ServletException {
-        AuthToken authToken = null;
         Account account = null;
         String accessToken = null;
         Server server = null;
 
-        try {
-            final String cookieString = getFromCookie(req.getCookies(),
-                    ZimbraCookie.authTokenCookieName(false));
-            authToken = getAuthToken(cookieString);
-            account = getAccount(authToken);
-            accessToken = NextCloudTokenHandler.refreshAccessToken(account, "nextcloud");
-            server = Provisioning.getInstance().getServer(account);
-            ZimbraLog.extensions.info("Refresh token :" + accessToken + " " + server.getName());
-        } catch (Exception e) {
-            ZimbraLog.extensions.info("Error fetching refresh token ", e);
-        }
-
-        try {
-
-            JSONObject receivedJSON = new JSONObject(IOUtils.toString(req.getPart("jsondata").getInputStream(), "UTF-8"));
-            String action = receivedJSON.getString("nextcloudAction");
-            String path = receivedJSON.getString("nextcloudPath");
-            String nextcloudDAVPath = receivedJSON.getString("nextcloudDAVPath");
-
-            SardineImpl sardine = new SardineImpl(accessToken);
-            //having to do a replace for spaces, maybe a bug in Sardine.
-            path = nextcloudDAVPath + uriEncode(path).replace("%2F", "/");
-
-            switch (action) {
-                case "propfind":
-                    JSONArray propfindResponse = this.propfind(sardine, path);
-                    resp.setContentType("application/json");
-                    resp.setCharacterEncoding("UTF-8");
-                    resp.getOutputStream().print(propfindResponse.toString());
-                    break;
-                case "get":
-                    ContentLengthInputStream is = sardine.get(path);
-                    Header[] originalHeadersFromNc = is.getResponse().getAllHeaders();
-                    for (int n = 0; n < originalHeadersFromNc.length; n++) {
-                        Header header = originalHeadersFromNc[n];
-                        if ("Content-Type".equals(header.getName())) {
-                            resp.setHeader("Content-Type", header.getValue());
-                        }
-                        if ("Content-Disposition".equals(header.getName())) {
-                            resp.setHeader("Content-Disposition", header.getValue());
-                        }
-                    }
-                    // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used.
-                    //is.transferTo(resp.getOutputStream());
-                    IOUtils.copy(is, resp.getOutputStream());
-                    is.close();
-                    break;
-                case "put":
-                    String name = receivedJSON.getString("nextcloudFilename");
-                    ZimbraLog.extensions.info("PUT action");
-                    //having to do a replace for spaces, maybe a bug in Sardine.
-                    name = uriEncode(name).replace("%2F", "/");
-                    resp.setContentType("application/json");
-                    resp.setCharacterEncoding("UTF-8");
-                    resp.getOutputStream().print(receivedJSON.toString());
-                    if (fetchMail(req, authToken, accessToken, path, name, receivedJSON, server)) {
-                        resp.setStatus(200);
-                    } else {
-                        resp.setStatus(500);
-                    }
-                    break;
-                case "createShare":
-                    String OCSPath = receivedJSON.getString("OCSPath");
-                    String shareType = receivedJSON.getString("shareType");
-                    String password = receivedJSON.getString("password");
-                    String expiryDate = receivedJSON.getString("expiryDate");
-                    path = uriEncode(receivedJSON.getString("nextcloudPath")).replace("%2F", "/");
-                    resp.setContentType("application/json");
-                    resp.setCharacterEncoding("UTF-8");
-                    //status is set from within createShare method
-                    resp.getOutputStream().print(createShare(accessToken, OCSPath, path, shareType, password, expiryDate, resp));
-                    break;
-                case "createTalkConv":
-                    JSONObject body = receivedJSON.getJSONObject("body");
-                    resp.setContentType("application/json");
-                    resp.setCharacterEncoding("UTF-8");
-                    resp.getOutputStream().print(doPostRequestToNextcloud(accessToken, body, receivedJSON.getString("NextcloudApiURL")));
-                    break;
-                default:
-                    resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
-                    return;
-            }
-
-        } catch (
-                Exception e) {
-            ZimbraLog.extensions.info(e);
-        }
-    }
-
-    /**
-     * Retrieves authToken from header or cookie.<br>
-     * JWT is searched for as priority, then cookie.
-     *
-     * @return An auth token
-     * @throws ServiceException If there are issues creating the auth token
-     */
-    protected static AuthToken getAuthToken(String authTokenStr)
-            throws ServiceException {
-        AuthToken authToken = null;
-        try {
-            authToken = ZimbraAuthToken.getAuthToken(authTokenStr);
-        } catch (final AuthTokenException e) {
-            ZimbraLog.extensions.info("Error authenticating user.");
-            throw ServiceException.PERM_DENIED(HttpServletResponse.SC_UNAUTHORIZED + ": "
-                    + L10nUtil.getMessage(MsgKey.errMustAuthenticate));
-        }
-        return authToken;
-    }
-
-
-    /**
-     * Retrieves a cookie from the cookie jar.
-     *
-     * @param cookies    Cookie jar
-     * @param cookieName The specific cookie we need
-     * @return A cookie
-     */
-    private static String getFromCookie(Cookie[] cookies, String cookieName) {
-        String encodedAuthToken = null;
-        if (cookies != null) {
-            for (int i = 0; i < cookies.length; i++) {
-                if (cookies[i].getName().equals(cookieName)) {
-                    encodedAuthToken = cookies[i].getValue();
-                    break;
-                }
-            }
-        }
-        return encodedAuthToken;
-    }
-
-    protected static Account getAccount(AuthToken authToken) throws ServiceException {
-        Account account = null;
+        //all authentication is done by AuthUtil.getAuthTokenFromHttpReq, returns null if unauthorized
+        final AuthToken authToken = AuthUtil.getAuthTokenFromHttpReq(req, resp, false, true);
         if (authToken != null) {
-            if (authToken.isZimbraUser()) {
-                if (!authToken.isRegistered()) {
-                    throw ServiceException.PERM_DENIED(HttpServletResponse.SC_UNAUTHORIZED + ": "
-                            + L10nUtil.getMessage(MsgKey.errMustAuthenticate));
+            try {
+                account = authToken.getAccount();
+                accessToken = NextCloudTokenHandler.refreshAccessToken(account, "nextcloud");
+                server = Provisioning.getInstance().getServer(account);
+                ZimbraLog.extensions.info("Refresh token :" + accessToken + " " + server.getName());
+            } catch (Exception e) {
+                ZimbraLog.extensions.info("Error fetching refresh token ", e);
+            }
+
+            try {
+                JSONObject receivedJSON = new JSONObject(IOUtils.toString(req.getPart("jsondata").getInputStream(), "UTF-8"));
+                String action = receivedJSON.getString("nextcloudAction");
+                String path = receivedJSON.getString("nextcloudPath");
+                String nextcloudDAVPath = receivedJSON.getString("nextcloudDAVPath");
+
+                SardineImpl sardine = new SardineImpl(accessToken);
+                //having to do a replace for spaces, maybe a bug in Sardine.
+                path = nextcloudDAVPath + uriEncode(path).replace("%2F", "/");
+
+                switch (action) {
+                    case "propfind":
+                        JSONArray propfindResponse = this.propfind(sardine, path);
+                        resp.setContentType("application/json");
+                        resp.setCharacterEncoding("UTF-8");
+                        resp.getOutputStream().print(propfindResponse.toString());
+                        break;
+                    case "get":
+                        ContentLengthInputStream is = sardine.get(path);
+                        Header[] originalHeadersFromNc = is.getResponse().getAllHeaders();
+                        for (int n = 0; n < originalHeadersFromNc.length; n++) {
+                            Header header = originalHeadersFromNc[n];
+                            if ("Content-Type".equals(header.getName())) {
+                                resp.setHeader("Content-Type", header.getValue());
+                            }
+                            if ("Content-Disposition".equals(header.getName())) {
+                                resp.setHeader("Content-Disposition", header.getValue());
+                            }
+                        }
+                        // can be used from Java 9 and up, since Zimbra is compiling at level 8 ATM this cannot be used.
+                        //is.transferTo(resp.getOutputStream());
+                        IOUtils.copy(is, resp.getOutputStream());
+                        is.close();
+                        break;
+                    case "put":
+                        String name = receivedJSON.getString("nextcloudFilename");
+                        ZimbraLog.extensions.info("PUT action");
+                        //having to do a replace for spaces, maybe a bug in Sardine.
+                        name = uriEncode(name).replace("%2F", "/");
+                        resp.setContentType("application/json");
+                        resp.setCharacterEncoding("UTF-8");
+                        resp.getOutputStream().print(receivedJSON.toString());
+                        if (fetchMail(req, authToken, accessToken, path, name, receivedJSON, server)) {
+                            resp.setStatus(200);
+                        } else {
+                            resp.setStatus(500);
+                        }
+                        break;
+                    case "createShare":
+                        String OCSPath = receivedJSON.getString("OCSPath");
+                        String shareType = receivedJSON.getString("shareType");
+                        String password = receivedJSON.getString("password");
+                        String expiryDate = receivedJSON.getString("expiryDate");
+                        path = uriEncode(receivedJSON.getString("nextcloudPath")).replace("%2F", "/");
+                        resp.setContentType("application/json");
+                        resp.setCharacterEncoding("UTF-8");
+                        //status is set from within createShare method
+                        resp.getOutputStream().print(createShare(accessToken, OCSPath, path, shareType, password, expiryDate, resp));
+                        break;
+                    case "createTalkConv":
+                        JSONObject body = receivedJSON.getJSONObject("body");
+                        resp.setContentType("application/json");
+                        resp.setCharacterEncoding("UTF-8");
+                        resp.getOutputStream().print(doPostRequestToNextcloud(accessToken, body, receivedJSON.getString("NextcloudApiURL")));
+                        break;
+                    default:
+                        resp.getOutputStream().print("com.zimbra.nextcloud is installed.");
+                        return;
                 }
-                try {
-                    account = AuthProvider.validateAuthToken(Provisioning.getInstance(),
-                            authToken, true);
-                } catch (final ServiceException e) {
-                    throw ServiceException.PERM_DENIED(HttpServletResponse.SC_UNAUTHORIZED + ": "
-                            + L10nUtil.getMessage(MsgKey.errMustAuthenticate));
-                }
-            } else {
-                throw ServiceException.PERM_DENIED(HttpServletResponse.SC_UNAUTHORIZED + ": "
-                        + L10nUtil.getMessage(MsgKey.errMustAuthenticate));
+
+            } catch (
+                    Exception e) {
+                ZimbraLog.extensions.info(e.getMessage());
             }
         } else {
-            throw ServiceException.PERM_DENIED(HttpServletResponse.SC_UNAUTHORIZED + ": "
-                    + L10nUtil.getMessage(MsgKey.errMustAuthenticate));
+            ZimbraLog.extensions.info("Nextcloud extension received a POST, but AuthToken was invalid.");
         }
-
-        if (account == null) {
-            throw ServiceException.PERM_DENIED(HttpServletResponse.SC_UNAUTHORIZED + ": "
-                    + L10nUtil.getMessage(MsgKey.errMustAuthenticate));
-        }
-
-        ZimbraLog.extensions.debug("Account is:%s", account);
-
-        return account;
     }
 
     public boolean fetchMail(HttpServletRequest req, AuthToken authToken, String
@@ -371,7 +275,7 @@ public class Nextcloud extends ExtensionHttpHandler {
 
             return true;
         } catch (Exception e) {
-            ZimbraLog.extensions.info("Error : ", e);
+            ZimbraLog.extensions.info("Error : ", e.getMessage());
             return false;
         }
     }
@@ -439,7 +343,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             }
             return arrayResponse;
         } catch (Exception e) {
-            ZimbraLog.extensions.info(e);
+            ZimbraLog.extensions.info(e.getMessage());
             return null;
         }
     }
@@ -454,7 +358,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             String clean = java.net.URLEncoder.encode(dirty, "UTF-8");
             return clean.replaceAll("\\+", "%20");
         } catch (Exception e) {
-            ZimbraLog.extensions.info(e);
+            ZimbraLog.extensions.info(e.getMessage());
             return null;
         }
     }
@@ -464,7 +368,7 @@ public class Nextcloud extends ExtensionHttpHandler {
             String clean = java.net.URLDecoder.decode(dirty, "UTF-8");
             return clean;
         } catch (Exception e) {
-            ZimbraLog.extensions.info(e);
+            ZimbraLog.extensions.info(e.getMessage());
             return null;
         }
     }
