@@ -65,8 +65,16 @@ import com.zimbra.cs.account.Server;
 import com.zimbra.cs.extension.ExtensionHttpHandler;
 import com.zimbra.cs.httpclient.URLUtil;
 import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
+import com.zimbra.common.localconfig.KnownKey;
 
 public class Nextcloud extends ExtensionHttpHandler {
+    public static final KnownKey nextcloud_zimlet_zimbra_hostname_override;
+
+    static {
+        nextcloud_zimlet_zimbra_hostname_override = new KnownKey("nextcloud_zimlet_zimbra_hostname_override");
+        nextcloud_zimlet_zimbra_hostname_override.setDefault("");
+    }
+
     public static final int request_timeout = 15000;
 
     /**
@@ -205,11 +213,16 @@ public class Nextcloud extends ExtensionHttpHandler {
             String uri;
             HttpURLConnection connection = null;
             SardineImpl sardine = new SardineImpl(accessToken);
-            ZimbraLog.extensions.info(req.getServerName() + ":" + server.getName());
-
+            ZimbraLog.extensions.info("req.getServerName(): " + req.getServerName() + ", server.getName():" + server.getName());
+            ZimbraLog.extensions.info("Local config nextcloud_zimlet_zimbra_hostname_override: " + nextcloud_zimlet_zimbra_hostname_override.value());
             if (!"skip".equals(mailObject.getString("id"))) {
                 String path = "/service/home/~/?auth=co&id=" + mailObject.getString("id") + "&disp=a";
-                uri = URLUtil.getServiceURL(server, path, true);
+
+                if (nextcloud_zimlet_zimbra_hostname_override.value() != null && !nextcloud_zimlet_zimbra_hostname_override.value().isEmpty()) {
+                    uri = nextcloud_zimlet_zimbra_hostname_override.value() + path.replaceAll("//", "/");
+                } else {
+                    uri = URLUtil.getServiceURL(server, path, true);
+                }
                 ZimbraLog.extensions.info(uri);
                 url = new URL(uri);
 
@@ -231,7 +244,6 @@ public class Nextcloud extends ExtensionHttpHandler {
                 }
             }
 
-
             JSONArray attachments = null;
             try {
                 attachments = mailObject.getJSONArray("attachments");
@@ -244,9 +256,15 @@ public class Nextcloud extends ExtensionHttpHandler {
                 for (int i = 0; i < attachments.length(); i++) {
                     JSONObject attachment = attachments.getJSONObject(i);
                     String path = "/" + attachment.getString("url") + "&disp=a";
-                    uri = URLUtil.getServiceURL(server, path, true);
-                    url = new URL(uri);
+
+                    if (nextcloud_zimlet_zimbra_hostname_override.value() != null && !nextcloud_zimlet_zimbra_hostname_override.value().isEmpty()) {
+                        uri = nextcloud_zimlet_zimbra_hostname_override.value() + path.replaceAll("//", "/");
+                    } else {
+                        uri = URLUtil.getServiceURL(server, path, true);
+                    }
                     ZimbraLog.extensions.info(uri);
+                    url = new URL(uri);
+
                     connection = (HttpURLConnection) url.openConnection();
                     connection.setDoOutput(true);
                     connection.setUseCaches(false);
@@ -272,7 +290,6 @@ public class Nextcloud extends ExtensionHttpHandler {
                     }
                 }
             }
-
             return true;
         } catch (Exception e) {
             ZimbraLog.extensions.info("Error : ", e.getMessage());
