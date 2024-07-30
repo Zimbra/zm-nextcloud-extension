@@ -46,6 +46,7 @@ import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
@@ -69,13 +70,25 @@ import com.zimbra.common.localconfig.KnownKey;
 
 public class Nextcloud extends ExtensionHttpHandler {
     public static final KnownKey nextcloud_zimlet_zimbra_hostname_override;
+    public static final KnownKey nextcloud_zimlet_debug;
+    public static final KnownKey nextcloud_request_timeout;
+
+    static {
+        nextcloud_zimlet_debug = new KnownKey("nextcloud_zimlet_debug");
+        nextcloud_zimlet_debug.setDefault("false");
+    }
 
     static {
         nextcloud_zimlet_zimbra_hostname_override = new KnownKey("nextcloud_zimlet_zimbra_hostname_override");
         nextcloud_zimlet_zimbra_hostname_override.setDefault("");
     }
 
-    public static final int request_timeout = 15000;
+    static {
+        nextcloud_request_timeout = new KnownKey("nextcloud_request_timeout");
+        nextcloud_request_timeout.setDefault("15000");
+    }
+
+    public static final int request_timeout = nextcloud_request_timeout.intValue();
 
     /**
      * The path under which the handler is registered for an extension.
@@ -122,7 +135,9 @@ public class Nextcloud extends ExtensionHttpHandler {
                 account = authToken.getAccount();
                 accessToken = NextCloudTokenHandler.refreshAccessToken(account, "nextcloud");
                 server = Provisioning.getInstance().getServer(account);
-                ZimbraLog.extensions.info("Refresh token :" + accessToken + " " + server.getName());
+                if ("true".equals(nextcloud_zimlet_debug.value())) {
+                    ZimbraLog.extensions.info("Refresh token :" + accessToken + " " + server.getName());
+                }
             } catch (Exception e) {
                 ZimbraLog.extensions.info("Error fetching refresh token ", e);
             }
@@ -209,9 +224,7 @@ public class Nextcloud extends ExtensionHttpHandler {
     public boolean fetchMail(HttpServletRequest req, AuthToken authToken, String
             accessToken, String Path, String fileName, JSONObject mailObject, Server server) {
         try {
-            URL url;
             String uri;
-            HttpURLConnection connection = null;
             SardineImpl sardine = new SardineImpl(accessToken);
             ZimbraLog.extensions.info("req.getServerName(): " + req.getServerName() + ", server.getName():" + server.getName());
             ZimbraLog.extensions.info("Local config nextcloud_zimlet_zimbra_hostname_override: " + nextcloud_zimlet_zimbra_hostname_override.value());
@@ -224,31 +237,27 @@ public class Nextcloud extends ExtensionHttpHandler {
                     uri = URLUtil.getServiceURL(server, path, true);
                 }
                 ZimbraLog.extensions.info(uri);
-                url = new URL(uri);
 
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setDoOutput(true);
-                connection.setUseCaches(false);
-                connection.setInstanceFollowRedirects(true);
-                connection.setRequestMethod("GET");
-                connection.setRequestProperty("charset", "utf-8");
-                connection.setRequestProperty("Content-Length", "0");
-                connection.setRequestProperty("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
-                connection.setUseCaches(false);
+                RequestConfig config = RequestConfig.custom().setConnectTimeout(request_timeout).setConnectionRequestTimeout(request_timeout).setSocketTimeout(request_timeout).build();
+                HttpClientBuilder clientBuilder = ZimbraHttpConnectionManager.getExternalHttpConnMgr().newHttpClient().setDefaultRequestConfig(config);
+                HttpResponse response;
+                HttpProxyUtil.configureProxy(clientBuilder);
+                HttpGet get = new HttpGet(uri);
+                get.addHeader("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
+                response = HttpClientUtil.executeMethod(clientBuilder.build(), get);
 
-                if (connection.getResponseCode() == 200) {
-                    sardine = new SardineImpl(accessToken);
-                    sardine.put(Path + fileName + ".eml", connection.getInputStream());
-                } else {
-                    throw new Exception("com.zimbra.nextcloud cannot fetch mail item");
-                }
+                //avoid 401 errors
+                sardine = new SardineImpl(accessToken);
+                //https://github.com/lookfirst/sardine/issues/310 empty file on Nextcloud
+                //https://docs.cyberduck.io/mountainduck/issues/fastcgi/#ZerobytefiletruncateissuewithNextcloudandownClouddeployedwithFastCGI
+                sardine.put(Path + fileName + ".eml", EntityUtils.toByteArray(response.getEntity()));
             }
 
             JSONArray attachments = null;
             try {
                 attachments = mailObject.getJSONArray("attachments");
             } catch (Exception e) {
-                ZimbraLog.extensions.errorQuietly("Error uploading attachment", e);
+                ZimbraLog.extensions.errorQuietly("Attachments not a JSON object, possibly no attachments", e);
             }
 
             //fetch and upload attachments
@@ -263,36 +272,32 @@ public class Nextcloud extends ExtensionHttpHandler {
                         uri = URLUtil.getServiceURL(server, path, true);
                     }
                     ZimbraLog.extensions.info(uri);
-                    url = new URL(uri);
 
-                    connection = (HttpURLConnection) url.openConnection();
-                    connection.setDoOutput(true);
-                    connection.setUseCaches(false);
-                    connection.setInstanceFollowRedirects(true);
-                    connection.setRequestMethod("GET");
-                    connection.setRequestProperty("charset", "utf-8");
-                    connection.setRequestProperty("Content-Length", "0");
-                    connection.setRequestProperty("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
-                    connection.setUseCaches(false);
+                    RequestConfig config = RequestConfig.custom().setConnectTimeout(request_timeout).setConnectionRequestTimeout(request_timeout).setSocketTimeout(request_timeout).build();
+                    HttpClientBuilder clientBuilder = ZimbraHttpConnectionManager.getExternalHttpConnMgr().newHttpClient().setDefaultRequestConfig(config);
+                    HttpResponse response;
+                    HttpProxyUtil.configureProxy(clientBuilder);
+                    HttpGet get = new HttpGet(uri);
+                    get.addHeader("Cookie", "ZM_AUTH_TOKEN=" + authToken.getEncoded() + ";");
+                    response = HttpClientUtil.executeMethod(clientBuilder.build(), get);
 
-                    if (connection.getResponseCode() == 200) {
-                        sardine = new SardineImpl(accessToken);
-                        //having to do a replace for spaces, maybe a bug in Sardine.
-                        String attachmentFileName = uriEncode(attachment.getString("filename")).replace("%2F", "/");
-                        if (!"skip".equals(mailObject.getString("id"))) {
-                            sardine.put(Path + fileName + '-' + attachmentFileName, connection.getInputStream());
-                        } else {
-                            sardine.put(Path + attachmentFileName, connection.getInputStream());
-                        }
+                    //having to do a replacement for spaces, maybe a bug in Sardine.
+                    String attachmentFileName = uriEncode(attachment.getString("filename")).replace("%2F", "/");
+                    sardine = new SardineImpl(accessToken);
+                    if (!"skip".equals(mailObject.getString("id"))) {
+                        sardine.put(Path + fileName + '-' + attachmentFileName, EntityUtils.toByteArray(response.getEntity()));
 
                     } else {
-                        throw new Exception("com.zimbra.nextcloud cannot fetch attachment");
+                        sardine.put(Path + attachmentFileName, EntityUtils.toByteArray(response.getEntity()));
                     }
                 }
             }
             return true;
         } catch (Exception e) {
             ZimbraLog.extensions.info("Error : ", e.getMessage());
+            if ("true".equals(nextcloud_zimlet_debug.value())) {
+                e.printStackTrace();
+            }
             return false;
         }
     }

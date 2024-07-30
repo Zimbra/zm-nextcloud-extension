@@ -1,6 +1,6 @@
 # zm-nextcloud-extension
 
-This is the back end for Nextcloud Zimlet Modern UI, see also: https://github.com/Zimbra/nextcloud-zimlet
+This is the back end for Nextcloud Zimlet Modern UI, see also: https://github.com/Zimbra/nextcloud-zimlet. Below documentation should only be used for troubleshooting, follow the admin guide for installation and set-up guidance!
 
 ## Compiling
 
@@ -68,4 +68,16 @@ If you are unable to configure Zimbra in such a way that the Nextcloud extension
   </key>
 ```
 You can include the port number as well if needed. After adding the local config, restart mailbox using `zmmailboxdctl restart`.
+
+## Available localconfig parameters
+
+You can tweak some of the settings from this integration by changing localconfig parameters. This table describes all the ones available. You must restart Zimbra mailbox for changes to be applied. As user zimbra run `zmmailboxdctl restart`.
+
+In 99% of cases these localconfig parameters are unnecessary.
+
+|  localconfig | required  | default | description |
+|---|---|---|---|
+| nextcloud_zimlet_zimbra_hostname_override  | no | unset | URL to your Zimbra server if differs from zimbraPublicServiceHostname (see above) |
+| nextcloud_zimlet_debug                     | no | false | Turns on logging of OAuth refresh token en stack dumps to zmmailboxd.out |
+| nextcloud_request_timeout                  | no | 15000 | Allows setting setConnectTimeout, setConnectionRequestTimeout and setSocketTimeout from ZimbraHttpConnectionManager |
 
