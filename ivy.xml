@@ -28,9 +28,9 @@
       <dependency org="zimbra" name="zm-store" rev="latest.integration" />
       <dependency org="zimbra" name="zm-oauth-social-common" rev="1.0"/>
       <!-- Transitive Requirements -->
-      <dependency org="com.fasterxml.jackson.core" name="jackson-core" rev="2.9.2"/>
-      <dependency org="com.fasterxml.jackson.core" name="jackson-annotations" rev="2.9.2"/>
-      <dependency org="com.fasterxml.jackson.core" name="jackson-databind" rev="2.9.2"/>
+      <dependency org="com.fasterxml.jackson.core" name="jackson-core" rev="2.18.1"/>
+      <dependency org="com.fasterxml.jackson.core" name="jackson-annotations" rev="2.18.1"/>
+      <dependency org="com.fasterxml.jackson.core" name="jackson-databind" rev="2.18.1"/>
       <!-- Test Requirements -->
       <dependency org="junit" name="junit" rev="4.8.2" />
       <dependency org="org.powermock" name="powermock-core" rev="1.6.5" />
