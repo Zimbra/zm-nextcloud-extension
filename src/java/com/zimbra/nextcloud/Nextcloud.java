@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
@@ -38,10 +39,6 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import javax.xml.namespace.QName;
 
-import com.zimbra.common.httpclient.HttpClientUtil;
-import com.zimbra.common.util.ZimbraHttpConnectionManager;
-import com.zimbra.cs.httpclient.HttpProxyUtil;
-import com.zimbra.cs.servlet.util.AuthUtil;
 import org.apache.commons.io.IOUtils;
 import org.apache.http.Header;
 import org.apache.http.HttpResponse;
@@ -58,15 +55,20 @@ import org.json.JSONObject;
 import com.github.sardine.DavResource;
 import com.github.sardine.impl.SardineImpl;
 import com.github.sardine.impl.io.ContentLengthInputStream;
+import com.zimbra.common.httpclient.HttpClientUtil;
+import com.zimbra.common.localconfig.KnownKey;
+import com.zimbra.common.service.ServiceException;
+import com.zimbra.common.util.ZimbraHttpConnectionManager;
 import com.zimbra.common.util.ZimbraLog;
 import com.zimbra.cs.account.Account;
 import com.zimbra.cs.account.AuthToken;
 import com.zimbra.cs.account.Provisioning;
 import com.zimbra.cs.account.Server;
 import com.zimbra.cs.extension.ExtensionHttpHandler;
+import com.zimbra.cs.httpclient.HttpProxyUtil;
 import com.zimbra.cs.httpclient.URLUtil;
+import com.zimbra.cs.servlet.util.AuthUtil;
 import com.zimbra.oauth.token.handlers.impl.NextCloudTokenHandler;
-import com.zimbra.common.localconfig.KnownKey;
 
 public class Nextcloud extends ExtensionHttpHandler {
     public static final KnownKey nextcloud_zimlet_zimbra_hostname_override;
@@ -147,6 +149,7 @@ public class Nextcloud extends ExtensionHttpHandler {
                 String action = receivedJSON.getString("nextcloudAction");
                 String path = receivedJSON.getString("nextcloudPath");
                 String nextcloudDAVPath = receivedJSON.getString("nextcloudDAVPath");
+                validateNextcloudDAVPath(account, nextcloudDAVPath);
 
                 SardineImpl sardine = new SardineImpl(accessToken);
                 //having to do a replace for spaces, maybe a bug in Sardine.
@@ -218,6 +221,27 @@ public class Nextcloud extends ExtensionHttpHandler {
             }
         } else {
             ZimbraLog.extensions.info("Nextcloud extension received a POST, but AuthToken was invalid.");
+        }
+    }
+
+    private void validateNextcloudDAVPath(Account account, String nextcloudDAVPath) throws ServiceException {
+        URL allowedUrl;
+        URL nextcloudDAVPathUrl;
+        String apiScope = Provisioning.getInstance().getDomainByName(account.getDomainName())
+                .getAttr("zimbraOAuthConsumerAPIScope", null);
+        if (apiScope == null) {
+            throw ServiceException.INVALID_REQUEST("Nextcloud API scope not configured", null);
+        }
+        try {
+            allowedUrl = new URL(apiScope);
+            nextcloudDAVPathUrl = new URL(nextcloudDAVPath);
+        } catch (MalformedURLException e) {
+            throw ServiceException.INVALID_REQUEST("Invalid Nextcloud API scope configuration", e);
+        }
+        if (!allowedUrl.getProtocol().equalsIgnoreCase(nextcloudDAVPathUrl.getProtocol()) ||
+                !allowedUrl.getHost().equalsIgnoreCase(nextcloudDAVPathUrl.getHost()) ||
+                allowedUrl.getPort() != nextcloudDAVPathUrl.getPort()) {
+            throw ServiceException.INVALID_REQUEST("Invalid Nextcloud DAV endpoint", null);
         }
     }
 
